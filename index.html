@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow"><title>Gold trading system: live results</title>
+<style>
+:root { --bg:#F6F7F9; --surface:#FFF; --ink:#17202B; --muted:#5B6675; --rule:#DCE1E7; --gold:#946A05; --gold-soft:#F4E8C8; --win:#2B7A4B; --loss:#B23F2C; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0F141B; --surface:#161E28; --ink:#E7EBF0; --muted:#98A4B3; --rule:#273241; --gold:#E1B54D; --gold-soft:#352C1A; --win:#5CC089; --loss:#E8806C; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { font-size: 28px; margin: 0 0 4px; } h2 { font-size: 20px; margin: 36px 0 8px; }
+.sub, .note { color: var(--muted); } .note { font-size: 14px; }
+.kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); border:1px solid var(--rule); border-radius: 10px; overflow:hidden; margin: 16px 0; }
+.kpis div { background: var(--surface); padding: 14px 16px; } .kpis dt { font-size: 13px; color: var(--muted); } .kpis dd { margin: 2px 0 0; font-size: 24px; font-weight: 650; }
+.panel { background: var(--surface); border:1px solid var(--rule); border-radius: 10px; padding: 16px; }
+table { border-collapse: collapse; width: 100%; background: var(--surface); font-size: 14px; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--rule); text-align: left; } th { color: var(--muted); font-weight: 600; } td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.win { color: var(--win); } .loss { color: var(--loss); }
+.scroll { overflow-x: auto; border:1px solid var(--rule); border-radius: 10px; }
+ul { padding-left: 20px; } li { margin: 4px 0; }
+#lock { max-width: 420px; margin: 12vh auto; } #lock input { width:100%; font-size:16px; padding:10px 12px; border:1px solid var(--rule); border-radius:8px; background:var(--surface); color:var(--ink); }
+#lock button { margin-top: 10px; font-size:16px; padding:10px 16px; border:0; border-radius:8px; background:var(--gold); color:#fff; cursor:pointer; }
+.legend span { display:inline-block; margin-right:16px; font-size:14px; } .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:6px; }
+svg text { fill: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+.disc { margin-top: 40px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; }
+</style></head>
+<body><main>
+<form id="lock"><h1>Live results</h1><p class="sub">This page is private. Enter the password you were given.</p>
+<input id="pw" type="password" autocomplete="current-password" aria-label="Password" required>
+<button type="submit">Open</button><p id="err" class="loss" role="alert"></p></form>
+<div id="app" hidden></div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var SRC = "investor.json";
+  function b64(s) { var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+  async function load(pass) {
+    var r = await fetch(SRC + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("The results couldn't be downloaded (HTTP " + r.status + "). Try again later.");
+    var blob = await r.json(), plain;
+    try {
+      var base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+      var k = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(blob.salt), iterations: blob.iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+      plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, k, b64(blob.ct));
+    } catch (e) { throw new Error("That password doesn't open this page."); }
+    return JSON.parse(await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text());
+  }
+  function el(t, a, kids) { var e = document.createElement(t); a = a || {}; Object.keys(a).forEach(function (k) { if (k === "text") e.textContent = a[k]; else if (k === "cls") e.className = a[k]; else e.setAttribute(k, a[k]); });
+    (kids || []).forEach(function (c) { if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); }); return e; }
+  function usd(x) { return x == null ? "–" : (x > 0 ? "+$" : x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2); }
+  function cell(x) { return el("span", { cls: x > 0 ? "win" : x < 0 ? "loss" : "", text: usd(x) }); }
+  function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "–"; }
+  function day(d) { return new Date(d + "T12:00:00Z").toLocaleDateString([], { day: "numeric", month: "short" }); }
+  function kpis(items) { return el("dl", { cls: "kpis" }, items.map(function (k) { return el("div", null, [el("dt", { text: k[0] }), el("dd", { text: String(k[1]) })]); })); }
+  function table(head, rows, num) {
+    return el("div", { cls: "scroll" }, [el("table", null, [el("thead", null, [el("tr", null, head.map(function (h, i) { return el("th", { cls: num.indexOf(i) >= 0 ? "n" : "", text: h }); }))]),
+      el("tbody", null, rows.map(function (r) { return el("tr", null, r.map(function (c, i) { var td = el("td", { cls: num.indexOf(i) >= 0 ? "n" : "" }); if (c instanceof Node) td.appendChild(c); else td.textContent = c == null ? "" : String(c); return td; })); }))])]);
+  }
+  var COLORS = ["#2F6FB0", "#8A4FB0", "#2B7A4B", "#B5651D"];
+  function chart(series) {
+    var W = 980, H = 300, L = 56, R = 12, T = 12, B = 34, ns = "http://www.w3.org/2000/svg";
+    var days = []; series.forEach(function (s) { s.pts.forEach(function (p) { if (days.indexOf(p[0]) < 0) days.push(p[0]); }); }); days.sort();
+    var ys = [0]; series.forEach(function (s) { s.pts.forEach(function (p) { ys.push(p[1]); }); });
+    var lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys); if (hi === lo) hi = lo + 1; var pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    var x = function (d) { return L + (days.length < 2 ? 0 : days.indexOf(d) / (days.length - 1)) * (W - L - R); }, y = function (v) { return T + (hi - v) / (hi - lo) * (H - T - B); };
+    var svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("width", "100%"); svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Running total of closed trades per account, USD per 0.01 lot");
+    function add(t, a) { var e = document.createElementNS(ns, t); Object.keys(a).forEach(function (k) { e.setAttribute(k, a[k]); }); svg.appendChild(e); return e; }
+    for (var i = 0; i <= 4; i++) { var v = lo + (hi - lo) * i / 4; add("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "currentColor", "stroke-opacity": 0.12 }); var tx = add("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end" }); tx.textContent = (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(0); }
+    add("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), stroke: "currentColor", "stroke-opacity": 0.45 });
+    var step = Math.max(1, Math.ceil(days.length / 8));
+    days.forEach(function (d, i) { if (i % step) return; var tx = add("text", { x: x(d), y: H - 10, "text-anchor": "middle" }); tx.textContent = day(d); });
+    series.forEach(function (s) { add("polyline", { fill: "none", stroke: s.color, "stroke-width": s.strong ? 3.5 : 2, points: s.pts.map(function (p) { return x(p[0]) + "," + y(p[1]); }).join(" ") }); });
+    return svg;
+  }
+  function render(d) {
+    var app = document.getElementById("app"); app.textContent = ""; app.hidden = false; document.getElementById("lock").hidden = true;
+    var A = d.accounts || [], av = d.average, all = d.all_trades;
+    app.appendChild(el("h1", { text: "Gold trading system: live results" }));
+    app.appendChild(el("p", { cls: "sub", text: "Real-money accounts only, closed trades up to " + new Date(d.data_to).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) +
+      " (shown " + d.delay_hours + " hours late). Every result is scaled to the smallest trade size, 0.01 lots (about $1 for each $1 gold moves), so accounts of any size compare like for like; a larger account scales in proportion." }));
+    if (!A.length) { app.appendChild(el("p", { text: "No closed trades to show yet." })); return; }
+    var first = A.map(function (a) { return a.first; }).sort()[0];
+    app.appendChild(kpis([["Live since", day(first)], ["Trading days", av ? av.days : "–"], ["Closed trades", all.trades], ["Trades won", pct(all.wins, all.trades)],
+      ["Average account, net", usd(av.net)], ["Average account, largest drop", usd(-av.max_drawdown)], ["Days up (average account)", av.days_up + " of " + av.days],
+      ["Profit factor", all.profit_factor == null ? "–" : all.profit_factor.toFixed(2)]]));
+    app.appendChild(el("h2", { text: "Running total" }));
+    var series = A.map(function (a, i) { return { name: a.name, pts: a.curve, color: COLORS[i % COLORS.length] }; });
+    if (av) series.push({ name: "Average account", pts: av.curve, color: "var(--gold)", strong: true });
+    app.appendChild(el("div", { cls: "panel" }, [chart(series), el("p", { cls: "legend" }, series.map(function (s) { return el("span", null, [el("i", { style: "background:" + s.color }), s.name]); }))]));
+    app.appendChild(el("p", { cls: "note", text: "Closed trades only, by the day they closed (Nairobi time), USD per 0.01 lot after the broker’s costs. The accounts started on different days and use different selections of the strategies below." }));
+    app.appendChild(el("h2", { text: "By account" }));
+    app.appendChild(table(["Account", "Since", "Trades", "Won", "Net", "Largest drop", "Best day", "Worst day", "Days up", "Profit factor"], A.map(function (a) {
+      return [a.name, day(a.first), a.trades, pct(a.wins, a.trades), cell(a.net), usd(-a.max_drawdown), cell(a.best_day), cell(a.worst_day), a.days_up + " of " + a.days, a.profit_factor == null ? "–" : a.profit_factor.toFixed(2)];
+    }), [2, 3, 4, 5, 6, 7, 8, 9]));
+    var weeks = []; A.forEach(function (a) { Object.keys(a.weeks).forEach(function (w) { if (weeks.indexOf(w) < 0) weeks.push(w); }); }); weeks.sort();
+    app.appendChild(el("h2", { text: "Week by week" }));
+    app.appendChild(table(["Week of"].concat(A.map(function (a) { return a.name; })), weeks.map(function (w) { return [day(w)].concat(A.map(function (a) { return w in a.weeks ? cell(a.weeks[w]) : "–"; })); }), A.map(function (_, i) { return i + 1; })));
+    app.appendChild(el("h2", { text: "By strategy (all accounts together)" }));
+    var S = all.strategies || {};
+    app.appendChild(table(["Strategy", "What it does", "Trades", "Won", "Net"], Object.keys(S).map(function (k) { var s = S[k]; return [k, (d.strategy_text || {})[k] || "", s.trades, pct(s.wins, s.trades), cell(s.net)]; }), [2, 3, 4]));
+    app.appendChild(el("h2", { text: "How it works" }));
+    app.appendChild(el("ul", null, [
+      "It watches a large pool of gold (XAUUSD) signal providers and scores every signal they post, with real trading costs, whether or not we trade it.",
+      "Only sources and signals that pass its quality checks are traded; weak sources are benched automatically and come back only when their results recover.",
+      "Orders go to the broker within seconds of a signal, with risk rules checked first on every account.",
+      "Every change is tested on a demo account and replayed on months of history before it reaches real money; an independent auditor checks each account every day."].map(function (t) { return el("li", { text: t }); })));
+    app.appendChild(el("h2", { text: "Risk controls" }));
+    app.appendChild(el("ul", null, [
+      "A hard cap on the loss of every trade, set before the order is sent.",
+      "Daily and weekly loss limits per account: no new trades once reached.",
+      "A cap on how many trades can be open at once.",
+      "No new trades around major economic news and during the most volatile hours of the day.",
+      "Sources that underperform during the week are paused automatically.",
+      "Each account’s owner can pause trading or tighten its limits at any time."].map(function (t) { return el("li", { text: t }); })));
+    app.appendChild(el("p", { cls: "disc", text: "Past results do not guarantee future results. Trading leveraged products such as gold CFDs carries a high risk of losing money, including more than a deposit in some cases. The track record shown is short and comes from small accounts; it is not an offer or a solicitation to invest, and no return is promised. Figures are the broker’s own results for closed trades, scaled to 0.01 lots, and exclude deposits and withdrawals." }));
+  }
+  document.getElementById("lock").addEventListener("submit", function (e) {
+    e.preventDefault(); var err = document.getElementById("err"); err.textContent = "Opening…";
+    if (!window.crypto || !crypto.subtle || !window.DecompressionStream) { err.textContent = "This browser is too old to open the page. Please use a current Chrome, Edge, Safari or Firefox."; return; }
+    load(document.getElementById("pw").value).then(function (d) { err.textContent = ""; render(d); }, function (x) { err.textContent = x.message || String(x); });
+  });
+})();
+</script></body></html>
